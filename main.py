@@ -1,97 +1,159 @@
-from fastapi import FastAPI
-import pandas as pd
-import numpy as np
-import joblib
+# =============================================================
+# main.py — FastAPI Backend for Diabetes + Meal Plan Prediction
+# =============================================================
 
+import os
+import numpy as np
+import pandas as pd
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+import pickle
 from meal_logic import (
     normalize_status,
     recommend_meal,
-    nutrition_info
+    show_nutrition_data
 )
 
-app = FastAPI(title="Diabetes Meal Plan API")
+# =============================================================
+# Initialize FastAPI App
+# =============================================================
+app = FastAPI(
+    title="Diabetes Prediction & Meal Plan API",
+    description="Predict diabetes status and generate meal plan",
+    version="1.0"
+)
 
-# =======================================================
-# LOAD MODEL + SCALER + LABEL ENCODER + FOOD DATA
-# =======================================================
-model = joblib.load("best_xgb.pkl")
-scaler = joblib.load("scaler.pkl")
-le = joblib.load("label_encoder.pkl")
+# =============================================================
+# Load Model & Artifacts
+# =============================================================
+print("🔄 Loading model and assets...")
 
-df_food = pd.read_csv("foods_prepared.csv", delimiter=";")
+# Load model
+with open("best_xgb.pkl", "rb") as f:
+    model = pickle.load(f)
 
-numeric_cols = ["energy_kcal","carbs","protein_g","fat_g","freesugar_g",
-                "fibre_g","cholestrol_mg","calcium_mg"]
+# Load scaler
+with open("scaler.pkl", "rb") as f:
+    scaler = pickle.load(f)
 
-for col in numeric_cols:
-    df_food[col] = pd.to_numeric(df_food[col], errors="coerce").fillna(0)
+# Load label encoder
+with open("label_encoder.pkl", "rb") as f:
+    label_encoder = pickle.load(f)
 
-# =======================================================
-# INPUT FEATURES
-# =======================================================
-model_features = ["bmi","age","fgb","avg_systolyc","avg_dystolyc","insulin_log"]
+# Load food dataset
+df_food = pd.read_csv("foods_prepared.csv")
 
+
+print("✅ All assets loaded successfully!")
+
+
+# =============================================================
+# Request Body Model
+# =============================================================
+class UserInput(BaseModel):
+    bmi: float
+    age: float
+    fgb: float
+    avg_systolyc: float
+    avg_dystolyc: float
+    insulin: float
+
+
+# =============================================================
+# Root Endpoint
+# =============================================================
+@app.get("/")
+def home():
+    return {"message": "API is running successfully 🎉"}
+
+
+# =============================================================
+# Prediction Endpoint
+# =============================================================
 @app.post("/predict")
-def predict(data: dict):
-    try:
-        # Ambil nilai
-        bmi = float(data["bmi"])
-        age = float(data["age"])
-        fgb = float(data["fgb"])
-        sys = float(data["avg_systolyc"])
-        dys = float(data["avg_dystolyc"])
-        insulin = float(data["insulin"])
+def predict_diabetes(data: UserInput):
+    # Convert to dict
+    user_data = data.dict()
 
-        # Transform insulin
-        insulin_log = np.log1p(insulin)
+    # Transform insulin → insulin_log
+    insulin_log = np.log1p(user_data["insulin"])
 
-        # Buat dataframe
-        df = pd.DataFrame([{
-            "bmi": bmi,
-            "age": age,
-            "fgb": fgb,
-            "avg_systolyc": sys,
-            "avg_dystolyc": dys,
-            "insulin_log": insulin_log
-        }], columns=model_features)
+    # Arrange final input
+    X_input = np.array([[ 
+        user_data["bmi"],
+        user_data["age"],
+        user_data["fgb"],
+        user_data["avg_systolyc"],
+        user_data["avg_dystolyc"],
+        insulin_log
+    ]])
 
-        df_scaled = scaler.transform(df)
+    # Scaling
+    X_scaled = scaler.transform(X_input)
 
-        # Prediksi
-        prob = model.predict_proba(df_scaled)[0]
-        pred_class = np.argmax(prob)
-        label = le.inverse_transform([pred_class])[0]
-        confidence = float(prob[pred_class])
+    # Predict class
+    pred_class = model.predict(X_scaled)[0]
 
-        # Normalisasi label
-        norm_label = normalize_status(label)
+    # Convert class index → label
+    pred_label = label_encoder.inverse_transform([pred_class])[0]
 
-        # Buat meal plan
-        meal = recommend_meal(df_food, norm_label)
+    return {
+        "status": pred_label
+    }
 
-        if meal is None:
-            return {"error": "Dataset makanan tidak cukup untuk status ini"}
 
-        # Nutrisi
-        breakfast_info = nutrition_info(df_food, meal["breakfast"])
-        lunch_info = nutrition_info(df_food, meal["lunch"])
-        dinner_info = nutrition_info(df_food, meal["dinner"])
+# =============================================================
+# Meal Plan Endpoint
+# =============================================================
+@app.post("/meal-plan")
+def get_meal_plan(data: UserInput):
 
-        return {
-            "prediction": label,
-            "normalized_prediction": norm_label,
-            "confidence": confidence,
-            "meal_plan": {
-                "breakfast": meal["breakfast"],
-                "lunch": meal["lunch"],
-                "dinner": meal["dinner"]
-            },
-            "nutrition": {
-                "breakfast": breakfast_info,
-                "lunch": lunch_info,
-                "dinner": dinner_info
-            }
+    # Predict diabetes status first
+    user_data = data.dict()
+
+    insulin_log = np.log1p(user_data["insulin"])
+
+    X_input = np.array([[ 
+        user_data["bmi"],
+        user_data["age"],
+        user_data["fgb"],
+        user_data["avg_systolyc"],
+        user_data["avg_dystolyc"],
+        insulin_log
+    ]])
+
+    X_scaled = scaler.transform(X_input)
+    pred_class = model.predict(X_scaled)[0]
+    pred_label = label_encoder.inverse_transform([pred_class])[0]
+
+    # Convert to meal logic format
+    normalized_status = normalize_status(pred_label)
+
+    # Get meal plan
+    meal_plan = recommend_meal(df_food, normalized_status)
+
+    # With nutrition breakdown
+    breakfast_info = show_nutrition_data(df_food, meal_plan["breakfast"])
+    lunch_info = show_nutrition_data(df_food, meal_plan["lunch"])
+    dinner_info = show_nutrition_data(df_food, meal_plan["dinner"])
+
+    return {
+        "status_predicted": normalized_status,
+        "meal_plan": meal_plan,
+        "nutrition": {
+            "breakfast": breakfast_info,
+            "lunch": lunch_info,
+            "dinner": dinner_info
         }
+    }
 
-    except Exception as e:
-        return {"error": str(e)}
+
+# =============================================================
+# Run in Railway (or local)
+# =============================================================
+if __name__ == "__main__":
+    import uvicorn
+
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
