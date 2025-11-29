@@ -1,65 +1,97 @@
 from fastapi import FastAPI
-from pydantic import BaseModel
-import joblib
 import pandas as pd
+import numpy as np
+import joblib
 
-# Import fungsi dari meal_logic (hanya yang ADA)
 from meal_logic import (
     normalize_status,
-    recommend_meal
+    recommend_meal,
+    nutrition_info
 )
 
-# === LOAD MODEL & SCALER ===
+app = FastAPI(title="Diabetes Meal Plan API")
+
+# =======================================================
+# LOAD MODEL + SCALER + LABEL ENCODER + FOOD DATA
+# =======================================================
 model = joblib.load("best_xgb.pkl")
 scaler = joblib.load("scaler.pkl")
-label_encoder = joblib.load("label_encoder.pkl")
+le = joblib.load("label_encoder.pkl")
 
-# === LOAD FOOD DATA ===
-df_food = pd.read_csv("foods_prepared.csv")
+df_food = pd.read_csv("foods_prepared.csv", delimiter=";")
 
-app = FastAPI()
+numeric_cols = ["energy_kcal","carbs","protein_g","fat_g","freesugar_g",
+                "fibre_g","cholestrol_mg","calcium_mg"]
 
-# ==== REQUEST BODY ====
-class UserInput(BaseModel):
-    bmi: float
-    age: float
-    fgb: float
-    avg_systolyc: float
-    avg_dystolyc: float
-    insulin: float
+for col in numeric_cols:
+    df_food[col] = pd.to_numeric(df_food[col], errors="coerce").fillna(0)
 
-
-@app.get("/")
-def home():
-    return {"message": "API is running successfully!"}
-
+# =======================================================
+# INPUT FEATURES
+# =======================================================
+model_features = ["bmi","age","fgb","avg_systolyc","avg_dystolyc","insulin_log"]
 
 @app.post("/predict")
-def predict_diabetes(data: UserInput):
+def predict(data: dict):
+    try:
+        # Ambil nilai
+        bmi = float(data["bmi"])
+        age = float(data["age"])
+        fgb = float(data["fgb"])
+        sys = float(data["avg_systolyc"])
+        dys = float(data["avg_dystolyc"])
+        insulin = float(data["insulin"])
 
-    insulin_log = __import__("numpy").log1p(data.insulin)
+        # Transform insulin
+        insulin_log = np.log1p(insulin)
 
-    X = pd.DataFrame([{
-        "bmi": data.bmi,
-        "age": data.age,
-        "fgb": data.fgb,
-        "avg_systolyc": data.avg_systolyc,
-        "avg_dystolyc": data.avg_dystolyc,
-        "insulin_log": insulin_log
-    }])
+        # Buat dataframe
+        df = pd.DataFrame([{
+            "bmi": bmi,
+            "age": age,
+            "fgb": fgb,
+            "avg_systolyc": sys,
+            "avg_dystolyc": dys,
+            "insulin_log": insulin_log
+        }], columns=model_features)
 
-    X_scaled = scaler.transform(X)
-    pred_class = model.predict(X_scaled)[0]
-    pred_label = label_encoder.inverse_transform([pred_class])[0]
+        df_scaled = scaler.transform(df)
 
-    # Normalize untuk meal plan
-    status_norm = normalize_status(pred_label)
+        # Prediksi
+        prob = model.predict_proba(df_scaled)[0]
+        pred_class = np.argmax(prob)
+        label = le.inverse_transform([pred_class])[0]
+        confidence = float(prob[pred_class])
 
-    # Generate meals
-    meal_plan = recommend_meal(df_food, status_norm)
+        # Normalisasi label
+        norm_label = normalize_status(label)
 
-    return {
-        "status_prediction": pred_label,
-        "meal_status_normalized": status_norm,
-        "meal_plan": meal_plan
-    }
+        # Buat meal plan
+        meal = recommend_meal(df_food, norm_label)
+
+        if meal is None:
+            return {"error": "Dataset makanan tidak cukup untuk status ini"}
+
+        # Nutrisi
+        breakfast_info = nutrition_info(df_food, meal["breakfast"])
+        lunch_info = nutrition_info(df_food, meal["lunch"])
+        dinner_info = nutrition_info(df_food, meal["dinner"])
+
+        return {
+            "prediction": label,
+            "normalized_prediction": norm_label,
+            "confidence": confidence,
+            "meal_plan": {
+                "breakfast": meal["breakfast"],
+                "lunch": meal["lunch"],
+                "dinner": meal["dinner"]
+            },
+            "nutrition": {
+                "breakfast": breakfast_info,
+                "lunch": lunch_info,
+                "dinner": dinner_info
+            }
+        }
+
+    except Exception as e:
+        return {"error": str(e)}
