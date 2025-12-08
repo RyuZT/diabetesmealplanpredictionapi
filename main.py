@@ -95,3 +95,4 @@ def predict(data: dict):
 
     except Exception as e:
         return {"error": str(e)}
+    
