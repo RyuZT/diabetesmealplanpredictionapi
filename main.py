@@ -2,6 +2,19 @@ from fastapi import FastAPI
 import pandas as pd
 import numpy as np
 import joblib
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+app = FastAPI(title="Diabetes Meal Plan API")
+
+# Allow mobile app access
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # nanti bisa dibatasi
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+) 
 
 from meal_logic import (
     normalize_status,
