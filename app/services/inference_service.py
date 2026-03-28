@@ -16,13 +16,14 @@ from app.ml.model_loader import get_food_data, get_model_artifacts
 from app.ml.postprocessing import parse_model_output
 from app.ml.preprocessing import build_feature_dataframe
 from app.schemas.predict import (
+    MealPlanItem,
     PredictData,
     PredictRequest,
     PredictionMetadata,
     TopPrediction,
 )
 from app.services.meal_service import (
-    build_nutrition_summary,
+    build_meal_plan_items,
     normalize_status,
     recommend_meal_plan,
 )
@@ -79,22 +80,21 @@ class InferenceService:
         normalized_prediction = normalize_status(prediction)
         top_predictions = [TopPrediction(**item) for item in top_prediction_data]
 
-        meal_plan = None
-        nutrition = None
+        meal_plan_items: list[MealPlanItem] = []
         warnings: list[str] = []
 
         try:
             food_df = get_food_data()
             meal_plan = recommend_meal_plan(food_df, normalized_prediction)
             if meal_plan is not None:
-                nutrition = build_nutrition_summary(food_df, meal_plan)
+                meal_plan_items = build_meal_plan_items(food_df, meal_plan)
         except Exception:
             logger.exception("Meal recommendation failed")
 
-        if meal_plan is None:
+        if not meal_plan_items:
             warnings.append(WARNING_MEAL_PLAN_UNAVAILABLE)
 
-        if meal_plan is not None and nutrition is None:
+        if meal_plan_items and any(item.nutrition is None for item in meal_plan_items):
             warnings.append(WARNING_NUTRITION_UNAVAILABLE)
 
         if confidence < LOW_CONFIDENCE_THRESHOLD:
@@ -106,8 +106,7 @@ class InferenceService:
             normalized_prediction=normalized_prediction,
             confidence=confidence,
             top_predictions=top_predictions,
-            meal_plan=meal_plan,
-            nutrition=nutrition,
+            meal_plan=meal_plan_items,
             warnings=warnings,
             metadata=PredictionMetadata(
                 model_version=settings.model_filename,

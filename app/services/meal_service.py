@@ -1,6 +1,6 @@
 import pandas as pd
 
-from app.schemas.predict import MealPlan, NutritionInfo, NutritionSummary
+from app.schemas.predict import MealPlan, MealPlanItem, NutritionInfo
 
 STATUS_RULES = {
     "Non-Diabetic": {
@@ -91,14 +91,21 @@ def nutrition_info(df_food: pd.DataFrame, food_name: str) -> NutritionInfo | Non
     )
 
 
-def build_nutrition_summary(
-    df_food: pd.DataFrame, meal_plan: MealPlan
-) -> NutritionSummary | None:
-    breakfast = nutrition_info(df_food, meal_plan.breakfast)
-    lunch = nutrition_info(df_food, meal_plan.lunch)
-    dinner = nutrition_info(df_food, meal_plan.dinner)
+def build_meal_plan_items(df_food: pd.DataFrame, meal_plan: MealPlan) -> list[MealPlanItem]:
+    meal_pairs = [
+        ("breakfast", meal_plan.breakfast),
+        ("lunch", meal_plan.lunch),
+        ("dinner", meal_plan.dinner),
+    ]
 
-    if not breakfast or not lunch or not dinner:
-        return None
+    items: list[MealPlanItem] = []
+    for meal_type, food_name in meal_pairs:
+        items.append(
+            MealPlanItem(
+                meal_type=meal_type,
+                food_name=food_name,
+                nutrition=nutrition_info(df_food, food_name),
+            )
+        )
 
-    return NutritionSummary(breakfast=breakfast, lunch=lunch, dinner=dinner)
+    return items

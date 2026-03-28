@@ -6,6 +6,8 @@ from app.api.routes import predict as predict_route
 from app.core.exceptions import PredictionFailedError
 from app.main import app
 from app.schemas.predict import (
+    MealPlanItem,
+    NutritionInfo,
     PredictData,
     PredictionMetadata,
     TopPrediction,
@@ -35,9 +37,23 @@ def test_predict_success(monkeypatch) -> None:
                 TopPrediction(label="Non-Diabetic", probability=0.91),
                 TopPrediction(label="Prediabetic", probability=0.07),
             ],
-            meal_plan=None,
-            nutrition=None,
-            warnings=["meal_plan_unavailable"],
+            meal_plan=[
+                MealPlanItem(
+                    meal_type="breakfast",
+                    food_name="Dhokla",
+                    nutrition=NutritionInfo(
+                        energy_kcal=216.49,
+                        carbs=30.68,
+                        protein_g=13.45,
+                        fat_g=5.28,
+                        freesugar_g=4.78,
+                        fibre_g=4.95,
+                        cholestrol_mg=5.16,
+                        calcium_mg=123.21,
+                    ),
+                )
+            ],
+            warnings=[],
             metadata=PredictionMetadata(
                 model_version="best_xgb.pkl",
                 inference_timestamp=datetime(2026, 3, 28, 8, 10, 31, tzinfo=timezone.utc),
@@ -58,14 +74,12 @@ def test_predict_success(monkeypatch) -> None:
     assert body["request_id"] == "req-123"
     assert body["data"]["prediction"] == "Non-Diabetic"
     assert body["data"]["top_predictions"][0]["label"] == "Non-Diabetic"
-    assert "warnings" in body["data"]
-    assert body["data"]["warnings"] == ["meal_plan_unavailable"]
+    assert isinstance(body["data"]["meal_plan"], list)
+    assert body["data"]["meal_plan"][0]["meal_type"] == "breakfast"
+    assert body["data"]["meal_plan"][0]["nutrition"]["energy_kcal"] == 216.49
+    assert body["data"]["warnings"] == []
     assert body["data"]["metadata"]["model_version"] == "best_xgb.pkl"
     assert body["data"]["metadata"]["inference_timestamp"]
-    assert "meal_plan" in body["data"]
-    assert body["data"]["meal_plan"] is None
-    assert "nutrition" in body["data"]
-    assert body["data"]["nutrition"] is None
     assert response.headers["X-Request-ID"] == "req-123"
 
 

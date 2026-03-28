@@ -112,11 +112,33 @@ uvicorn app.main:app --reload
         "probability": 0.07
       }
     ],
-    "meal_plan": null,
-    "nutrition": null,
-    "warnings": [
-      "meal_plan_unavailable"
+    "meal_plan": [
+      {
+        "meal_type": "breakfast",
+        "food_name": "Dhokla",
+        "nutrition": {
+          "energy_kcal": 216.49,
+          "carbs": 30.68,
+          "protein_g": 13.45,
+          "fat_g": 5.28,
+          "freesugar_g": 4.78,
+          "fibre_g": 4.95,
+          "cholestrol_mg": 5.16,
+          "calcium_mg": 123.21
+        }
+      },
+      {
+        "meal_type": "lunch",
+        "food_name": "Paneerstuffedcheela/chilla",
+        "nutrition": null
+      },
+      {
+        "meal_type": "dinner",
+        "food_name": "Edamame Boiled",
+        "nutrition": null
+      }
     ],
+    "warnings": [],
     "metadata": {
       "model_version": "best_xgb.pkl",
       "inference_timestamp": "2026-03-28T08:10:31Z"
@@ -126,7 +148,7 @@ uvicorn app.main:app --reload
 }
 ```
 
-`meal_plan` dan `nutrition` selalu ada di kontrak response, nilainya bisa `null` jika data tidak tersedia.
+`meal_plan` selalu berupa array. Jika rekomendasi tidak tersedia, nilainya `[]` dan warning code akan diisi.
 
 ## Warning Codes (Predict Response)
 

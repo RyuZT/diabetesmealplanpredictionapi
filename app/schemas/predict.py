@@ -32,10 +32,10 @@ class NutritionInfo(BaseModel):
     calcium_mg: float
 
 
-class NutritionSummary(BaseModel):
-    breakfast: NutritionInfo
-    lunch: NutritionInfo
-    dinner: NutritionInfo
+class MealPlanItem(BaseModel):
+    meal_type: Literal["breakfast", "lunch", "dinner"]
+    food_name: str
+    nutrition: NutritionInfo | None = None
 
 
 class TopPrediction(BaseModel):
@@ -53,8 +53,7 @@ class PredictData(BaseModel):
     normalized_prediction: str
     confidence: float = Field(..., ge=0, le=1)
     top_predictions: list[TopPrediction] = Field(default_factory=list)
-    meal_plan: MealPlan | None = None
-    nutrition: NutritionSummary | None = None
+    meal_plan: list[MealPlanItem] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     metadata: PredictionMetadata
 
