@@ -1,0 +1,23 @@
+# Development override for local machine usage only.
+services:
+  app:
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --reload
+    ports:
+      - "8000:8000"
+    read_only: false
+    tmpfs: []
+    security_opt: []
+    cap_drop: []
+    volumes:
+      - ./app:/app/app
+
+  proxy:
+    profiles:
+      - proxy

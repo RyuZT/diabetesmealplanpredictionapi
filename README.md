@@ -49,6 +49,10 @@ app/
 tests/
   test_health.py
   test_predict.py
+Dockerfile
+.dockerignore
+docker-compose.yml
+Caddyfile
 ```
 
 ## Setup
@@ -63,7 +67,7 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-## Run Local
+## Local App Run (Without Compose)
 
 ```bash
 uvicorn app.main:app --reload
@@ -75,23 +79,106 @@ uvicorn app.main:app --reload
 - `GET /api/v1/readyz`
 - `POST /api/v1/predict`
 
-## Health vs Ready
+## Docker Compose Deployment (Recommended for VPS)
 
-- `healthz`: memastikan service process hidup.
-- `readyz`: memastikan resource penting siap (`model`, `scaler`, `label_encoder`, `food_data`).
+Deploy architecture:
 
-## Request Example
+- `app` service: FastAPI inference API (internal network only)
+- `proxy` service: Caddy reverse proxy (public port 80/443)
+- internal Docker network `app_net`
+- Caddy forwards requests to `app:8000`
+- app tidak dipublish langsung ke host
 
-```json
-{
-  "bmi": 24.7,
-  "age": 43,
-  "fgb": 98,
-  "avg_systolic": 122,
-  "avg_diastolic": 80,
-  "insulin": 12
-}
+### Environment
+
+Gunakan `.env` untuk konfigurasi app. Tambahan penting untuk proxy:
+
+- `CADDY_SITE_ADDRESS=:80` untuk local/VPS tanpa domain
+- set `CADDY_SITE_ADDRESS=api.your-domain.com` untuk domain + auto TLS Caddy
+
+### Compose Commands
+
+Build and start:
+
+```bash
+docker compose up -d --build
 ```
+
+Stop and remove containers:
+
+```bash
+docker compose down
+```
+
+Show logs:
+
+```bash
+docker compose logs -f
+```
+
+Show logs per service:
+
+```bash
+docker compose logs -f app
+docker compose logs -f proxy
+```
+
+Restart service:
+
+```bash
+docker compose restart app
+docker compose restart proxy
+```
+
+Check status and health:
+
+```bash
+docker compose ps
+docker inspect --format='{{json .State.Health}}' $(docker compose ps -q app)
+```
+
+## Local Runtime Test Checklist
+
+1. Health endpoint (through proxy):
+
+```bash
+curl http://localhost/api/v1/healthz
+```
+
+Expected: `200` + `success=true`.
+
+2. Readiness endpoint (through proxy):
+
+```bash
+curl http://localhost/api/v1/readyz
+```
+
+Expected: `200` jika artifact model + data siap.
+
+3. Prediction endpoint (through proxy):
+
+```bash
+curl -X POST http://localhost/api/v1/predict \
+  -H "Content-Type: application/json" \
+  -d '{"bmi":24.7,"age":43,"fgb":98,"avg_systolic":122,"avg_diastolic":80,"insulin":12}'
+```
+
+Expected: `200` + payload prediksi lengkap.
+
+Troubleshooting cepat:
+
+- `proxy` up, `app` unhealthy -> cek `docker compose logs -f app`
+- `/healthz` ok tapi `/readyz` fail -> biasanya artifact/data path
+- request dapat 502 dari proxy -> biasanya app belum ready / app crash
+
+## Monitoring Dasar
+
+- Gunakan `/api/v1/healthz` untuk uptime monitor eksternal (Uptime Kuma, Better Stack, dll).
+- Gunakan `/api/v1/readyz` untuk memonitor kesiapan inference resource.
+- Operasional harian cukup dengan:
+  - `docker compose ps`
+  - `docker compose logs -f app`
+  - `docker compose logs -f proxy`
 
 ## Success Response Example
 
@@ -126,16 +213,6 @@ uvicorn app.main:app --reload
           "cholestrol_mg": 5.16,
           "calcium_mg": 123.21
         }
-      },
-      {
-        "meal_type": "lunch",
-        "food_name": "Paneerstuffedcheela/chilla",
-        "nutrition": null
-      },
-      {
-        "meal_type": "dinner",
-        "food_name": "Edamame Boiled",
-        "nutrition": null
       }
     ],
     "warnings": [],
@@ -147,14 +224,6 @@ uvicorn app.main:app --reload
   "request_id": "e4aa9a4e-ef21-4ea6-b97f-8e37691d8ed8"
 }
 ```
-
-`meal_plan` selalu berupa array. Jika rekomendasi tidak tersedia, nilainya `[]` dan warning code akan diisi.
-
-## Warning Codes (Predict Response)
-
-- `meal_plan_unavailable`
-- `nutrition_unavailable`
-- `low_confidence`
 
 ## Error Response Example
 
@@ -176,52 +245,8 @@ uvicorn app.main:app --reload
 }
 ```
 
-## Main Error Codes
-
-- `validation_error`
-- `bad_request`
-- `model_not_loaded`
-- `prediction_failed`
-- `resource_not_ready`
-- `internal_server_error`
-- `http_error`
-
-## Request ID / Correlation
-
-- Setiap request diproses dengan `request_id`.
-- Jika client mengirim header `X-Request-ID`, nilai itu dipakai.
-- Jika tidak, server generate UUID otomatis.
-- `request_id` dimasukkan ke response body error/success dan response header `X-Request-ID`.
-
-## Update Model Artifacts
-
-Simpan artifact baru di:
-
-- `app/models/best_xgb.pkl`
-- `app/models/scaler.pkl`
-- `app/models/label_encoder.pkl`
-
-Jika format input model berubah, update:
-
-- `app/ml/preprocessing.py` (mapping dan urutan feature)
-- `app/core/constants.py` (`MODEL_FEATURES`)
-
 ## Run Tests
 
 ```bash
 pytest -q
-```
-
-## Docker
-
-Build:
-
-```bash
-docker build -t diabetes-ml-api .
-```
-
-Run:
-
-```bash
-docker run --rm -p 8000:8000 diabetes-ml-api
 ```
